@@ -1,0 +1,40 @@
+name: TOML File Change Trigger
+
+on:
+  push:
+    paths:
+      - 'photoniq_vwrs.toml'
+
+jobs:
+  execute-vwrs-script:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0 # Ensures the entire git history is fetched
+
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.9'
+
+      - name: Install Dependencies
+        run: |
+          cd cicd
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: Set Environment Variables from Secrets
+        run: |
+          echo "VWRS_API_KEY=${{ secrets.VWRS_API_KEY }}" >> $GITHUB_ENV
+          echo "VWRS_HOST=${{ secrets.VWRS_HOST }}" >> $GITHUB_ENV
+      
+      - name: Run VWRS Script
+        run: |
+          cd cicd
+          python vwrs-cicd.py
+        env:
+          VWRS_API_KEY: ${{ env.VWRS_API_KEY }}
+          VWRS_HOST: ${{ env.VWRS_HOST }}
+        
