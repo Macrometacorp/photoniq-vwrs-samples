@@ -21,7 +21,6 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          cd cicd
           python -m pip install --upgrade pip
           pip install -r requirements.txt
       
@@ -32,7 +31,6 @@ jobs:
       
       - name: Run VWRS Script
         run: |
-          cd cicd
           python vwrs-cicd.py
         env:
           VWRS_API_KEY: ${{ env.VWRS_API_KEY }}
