@@ -1,0 +1,6 @@
+{
+  "edgeworker-version": "0.33",
+  "bundle-version": 1,
+  "api-version": "0.3",
+  "description": "Virtual Waiting Room"
+}

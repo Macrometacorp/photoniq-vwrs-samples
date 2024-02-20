@@ -1,0 +1,18 @@
+image: python:3.9
+
+pipelines:
+  default:
+    - step:
+        name: Check for Changes and Execute Script
+        script:
+          - echo "Fetching changes..."
+          - git fetch --depth=50
+          - FILECHANGES=$(git diff --name-only HEAD~1 HEAD | grep 'photoniq_vwrs.toml' || echo "")
+          - |
+            if [ -n "$FILECHANGES" ]; then
+              echo "Changes detected in photoniq_vwrs.toml. Executing script..."
+              pip install -r requirements.txt
+              python vwrs-cicd.py
+            else
+              echo "No changes detected in photoniq_vwrs.toml. Skipping execution."
+            fi
