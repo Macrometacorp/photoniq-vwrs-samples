@@ -1,5 +1,5 @@
 [[policies]]
-domain_key = "dev-checkout2"
+domain_key = "<unique_waiting_room_name>"
 domain_url = "www.example.com/abc"
 queue_access_type = "users"
 queue_type = "fifo"
