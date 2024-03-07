@@ -1,5 +1,5 @@
 [[policies]]
-domain_key = "<unique_waiting_room_name>"
+domain_key = "dev-checkout2"
 domain_url = "www.example.com/abc"
 queue_access_type = "users"
 queue_type = "fifo"
@@ -9,6 +9,6 @@ queue_mode = "auto"
 request_priority = [1, 4, 25]
 waiting_room_path = "/netstorage/vroom.html"
 waiting_room_interval = 10
-dequeue_mode = "auto"
+dequeue_mode = "on"
 max_origin_usage_time = 60
 max_orgin_idle_time = 90
