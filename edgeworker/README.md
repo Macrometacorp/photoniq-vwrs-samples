@@ -13,7 +13,7 @@ You can pass the following configuration
    isFailOpen|boolean|: set it to 'true' to navigate to origin in case of failure,(default to true)
    digestKey:"YourVwrsDigestKey",
    encryptionKey: "YourVwrsEncryptionKey",
-   originAccessMode: "FIXED", //default is 'MOVING'(FIXED | MOVING),
+   originAccessMode: "ORIGIN_USAGE_TIME", //default is 'ORIGIN_IDLE_TIME'(ORIGIN_USAGE_TIME | ORIGIN_IDLE_TIME),
    statusConfigLimits:{
       avgWaitingTime:true|false,
       qDepth: true|false,
@@ -35,7 +35,7 @@ const virtualWaitingRoom = new VirtualWaitingRoom({
   isFailOpen: "<false | true>", // will be boolean value true by default
   digestKey: "<false | true>",
   encryptionKey: "YourVwrsEncryptionKey",
-  originAccessMode: "<FIXED | MOVING>", //default is 'MOVING',
+  originAccessMode: "<ORIGIN_USAGE_TIME | ORIGIN_IDLE_TIME>", //default is 'ORIGIN_USAGE_TIME',
   statusConfigLimits:{
     avgWaitingTime:<true | false>, //default is 'false'
     qDepth: <true | false>, //default is 'false'
