@@ -37,21 +37,6 @@ def print_response_content(response):
     if response.content:
             print(f'Response content: {response.content.decode("utf-8")}\n')
 
-def get_domain_mapping(dictionary):
-    """Converts policy data from the TOML format to the format expected by the database."""
-    updated = {}
-    for key, value in dictionary.items():
-        if key == 'queue_mode' and value != 'auto':
-            # request -> db entry
-            # auto -> auto
-            # off -> manual + no queue
-            # on -> manual + queue
-            value = 'manual'
-            updated['is_queue_enabled'] = (value == 'on')
-        # Use the FIELD_NAME_MAPPING to translate TOML field names to database field names.
-        updated[key] = value
-    return updated
-
 def get_domain(key):
     """Fetches an existing domain entry from VWRS API by a unique key."""
     try:
@@ -105,16 +90,14 @@ def process_entries(entries):
     """Processes each policy entry by either updating an existing entry or creating a new one."""
     for entry in entries:
         key = entry['domain_key']
-        # Convert the entry from TOML format to vwrs format.
-        vwrs_entry = get_domain_mapping(entry)
         # Attempt to fetch an existing domain entry by its key.
         existing_entry = get_domain(key)
         if existing_entry:
             # If an entry exists, update it with the new data.
-            update_domain(key, vwrs_entry)
+            update_domain(key, entry)
         else:
             # If no entry exists, create a new one.
-            create_domain(vwrs_entry)
+            create_domain(entry)
 
 def collect_domain_paths(policies):
     """Collect a set of all domain_url fields from a list of policies."""
