@@ -1,5 +1,5 @@
 import { logger } from "log";
-import VirtualWaitingRoom from "./library/virtualWaitingRoom.js";
+import VirtualWaitingRoom from "./virtualWaitingRoom.js";
 
 const clientConnection = new VirtualWaitingRoom({
   apiKey: "YourAPIKey",
