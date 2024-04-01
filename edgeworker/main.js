@@ -1,5 +1,5 @@
 import { logger } from "log";
-import VirtualWaitingRoom from "./virtualWaitingRoom.js";
+import VirtualWaitingRoom from "./library/virtualWaitingRoom.js";
 
 const clientConnection = new VirtualWaitingRoom({
   apiKey: "YourAPIKey",
@@ -7,7 +7,7 @@ const clientConnection = new VirtualWaitingRoom({
   vwrsHost: "YourVwrsURL",
   digestKey: "<false | true>",
   encryptionKey: "YourVwrsEncryptionKey",
-  originAccessMode: "FIXED", //default is 'MOVING'(FIXED | MOVING),
+  originAccessMode: "ORIGIN_IDLE_TIME", //default is 'ORIGIN_USAGE_TIME'(ORIGIN_USAGE_TIME | ORIGIN_IDLE_TIME),
 });
 
 export async function onClientRequest(request) {
