@@ -17,21 +17,21 @@ import { TextEncoder, base64, TextDecoder } from 'encoding';
 
 var OriginAccessMode;
 (function (OriginAccessMode) {
-    OriginAccessMode["FIXED"] = "FIXED";
-    OriginAccessMode["MOVING"] = "MOVING";
+    OriginAccessMode["ORIGIN_USAGE_TIME"] = "ORIGIN_USAGE_TIME";
+    OriginAccessMode["ORIGIN_IDLE_TIME"] = "ORIGIN_IDLE_TIME";
 })(OriginAccessMode || (OriginAccessMode = {}));
 const VwrDefaults = {
     VWRS_SUFFIX: "/api/vwr/v1",
     METRIC_SUFFIX: "/api/vwr/v1/metrics/origin",
     WAITING_ROOM_ORIGIN: "waitingroom",
-    ORIGIN_ACCESS_MODE: OriginAccessMode.MOVING,
+    ORIGIN_ACCESS_MODE: OriginAccessMode.ORIGIN_USAGE_TIME,
     RETRY_LIMIT: 0,
     PRIORITY: 0,
     BACK_OFF_THRESHOLD: 0.85,
     NO_BACK_OFF_THRESHOLD: 5,
     REQUEST_TIMEOUT: 4500,
 };
-const VWRoomVersion = "1.24.0";
+const VWRoomVersion = "1.26.0";
 var HttpMethods;
 (function (HttpMethods) {
     HttpMethods["GET"] = "GET";
@@ -48,7 +48,7 @@ var HttpStatusCodes;
 var EwPaths;
 (function (EwPaths) {
     EwPaths["ROOT"] = "/";
-    EwPaths["STATUS"] = "/status";
+    EwPaths["STATUS"] = "/queue-status";
     EwPaths["PREVIEW"] = "/preview";
 })(EwPaths || (EwPaths = {}));
 var Headers;
@@ -167,18 +167,24 @@ var Encryption;
     Encryption["DELIMITER"] = ":";
     Encryption["DECRYPTION_FAILED"] = "D_FAIL";
 })(Encryption || (Encryption = {}));
+var DequeueMode;
+(function (DequeueMode) {
+    DequeueMode["ON"] = "on";
+    DequeueMode["OFF"] = "off";
+})(DequeueMode || (DequeueMode = {}));
 const PreviewStatusResponse = {
     REQ_ID: "R-b69f3f06-6055-4c2a-947f-d74f316d479f",
     PREVIEW_DATA_OBJ: {
         avg_waiting_time: 100,
         queue_depth: 200,
         position: 100,
-        status_interval: 500,
+        waiting_room_interval: 500,
+        dequeue_mode: DequeueMode.ON
     },
 };
 const keyMappings = {
     domainDetails: "dd",
-    access_duration: "ad",
+    max_origin_usage_time: "ad",
     waiting_room_path: "wrp",
     is_queue_enabled: "qe",
     domain_key: "dk",
@@ -197,6 +203,7 @@ const keyMappings = {
     createdAt: "c",
     type: "t",
     meta: "m",
+    delayTime: "dt",
 };
 
 class Connection {
@@ -603,7 +610,7 @@ const persistCookieData = (request, debugMode, decryptedData) => {
     if (debugMode === true) {
         logger.log("Cookie persist data %s PMUser size %s", stringified, getPMUserLength(request) + stringified.length);
     }
-    logger.log("PMUser current size %s + persis length %s %s", getPMUserLength(request), stringified.length, stringified);
+    logger.log("PMUser current size %s + persis length %s", getPMUserLength(request), stringified.length);
     request.setVariable(TransportVariables.VWRS_PERSIST, stringified);
 };
 /**
@@ -618,7 +625,7 @@ const persistTokenType = (request, type) => {
     updatedData = updateTimesSubtractCreatedAt(updatedData);
     updatedData = mapKeysToShort(updatedData);
     const stringified = JSON.stringify(updatedData);
-    logger.log("PMUser current size %s + persis length %s %s", getPMUserLength(request), stringified.length, stringified);
+    logger.log("PMUser current size %s + persis length %s", getPMUserLength(request), stringified.length);
     request.setVariable(TransportVariables.VWRS_PERSIST, stringified);
 };
 /**
@@ -643,7 +650,7 @@ const persistData = (request, options = { meta: {} }) => {
     updatedData = updateTimesSubtractCreatedAt(updatedData);
     updatedData = mapKeysToShort(updatedData);
     const stringified = JSON.stringify(updatedData);
-    logger.log("PMUser current size %s + persis length %s %s", getPMUserLength(request), stringified.length, stringified);
+    logger.log("PMUser current size %s + persis length %s", getPMUserLength(request), stringified.length);
     request.setVariable(TransportVariables.VWRS_PERSIST, stringified);
 };
 const formatReqStatusResponse = (reqStatus) => {
@@ -651,8 +658,8 @@ const formatReqStatusResponse = (reqStatus) => {
         return;
     }
     let modifiedReqStatus = { ...reqStatus };
-    // removing backoff_interval from reqStatus
-    const { backoff_interval, ...remainingValues } = modifiedReqStatus;
+    // removing backoff_interval, dequeue_mode from reqStatus
+    const { backoff_interval, dequeue_mode, ...remainingValues } = modifiedReqStatus;
     modifiedReqStatus = remainingValues;
     if (Connection.getInstance().statusConfigLimits.avgWaitingTime) {
         // remove avg_waiting_time from reqStatus
@@ -763,9 +770,12 @@ const getPMUserLength = (request, withPersistSize = false) => {
                 (request.getVariable(TransportVariables.VWRS_PERSIST)?.length || 0);
     return size;
 };
+const generateRandomInteger = (min, max) => {
+    return Math.floor(Math.random() * (max - min + 1)) + min;
+};
 
 const getAccessCookieMaxAge = (grantedAt, accessDuration, originAccessMode) => {
-    const maxAge = originAccessMode === OriginAccessMode.FIXED
+    const maxAge = originAccessMode === OriginAccessMode.ORIGIN_USAGE_TIME
         ? // maxAge is the remaining time from "gratedAt"
             accessDuration - VwrDurations.getTimeElapsedSec(grantedAt)
         : // maxAge is a new block of time equal to accessDuration
@@ -1034,7 +1044,7 @@ const newRequestHandler = async (request, requestOpts) => {
     logger.log(`Q is enabled ${is_queue_enabled}`);
     if (is_queue_enabled) {
         logger.log("Q is enabled");
-        const { sid, created_at, backoff_interval, position, rate_limit, queue_depth, status_interval, } = await pushRequestToQueue(request, RequestType.NEW_REQUEST, reqId, domain_key, priority).then((res) => res.json());
+        const { sid, created_at, backoff_interval, position, rate_limit, queue_depth, waiting_room_interval, } = await pushRequestToQueue(request, RequestType.NEW_REQUEST, reqId, domain_key, priority).then((res) => res.json());
         logger.log("request pushed to Q", domain_key, sid, created_at);
         persistData(request, {
             meta: {
@@ -1048,7 +1058,7 @@ const newRequestHandler = async (request, requestOpts) => {
                     curPos: position,
                     rLimit: rate_limit,
                     qDepth: queue_depth,
-                    statInt: status_interval,
+                    statInt: waiting_room_interval,
                 },
             },
             createdAt: cookieCreatedAt,
@@ -1079,6 +1089,7 @@ const existingRequestHandler = async (request, requestOpts) => {
     const queueDepth = persistedData?.meta?.requestDetails?.qDepth;
     const statusInterval = persistedData?.meta?.requestDetails?.statInt;
     const rateLimit = persistedData?.meta?.requestDetails?.rLimit;
+    const delayTime = persistedData?.meta?.requestDetails?.delayTime;
     let reqStatusInQ;
     let requestDetails = {
         sid,
@@ -1097,9 +1108,10 @@ const existingRequestHandler = async (request, requestOpts) => {
             avg_waiting_time: newWaitTime,
             position: newPosition,
             queue_depth: queueDepth < newPosition ? newPosition : queueDepth,
-            status_interval: statusInterval,
+            waiting_room_interval: statusInterval,
             backoff_interval: 0,
             rate_limit: rateLimit,
+            dequeue_mode: DequeueMode.ON, // Edgeworker don't know backend status assuming backend is dequeing until next call
         };
         // update current position in cookie and last request time
         requestDetails = {
@@ -1115,15 +1127,47 @@ const existingRequestHandler = async (request, requestOpts) => {
     }
     else {
         reqStatusInQ = await getQueueStatusForRequest(request, reqId, domain_key, sid, created_at, priority).then((res) => res.json());
-        // update current position in cookie, backoff_interval
         requestDetails = {
             ...requestDetails,
-            curPos: reqStatusInQ.position,
-            nextCallTime: reqStatusInQ.backoff_interval * 1000 + currentRequestTime,
             qDepth: reqStatusInQ.queue_depth,
-            statInt: reqStatusInQ.status_interval,
+            statInt: reqStatusInQ.waiting_room_interval,
             rLimit: reqStatusInQ.rate_limit,
         };
+        // logic for dequeue on and off
+        if (reqStatusInQ.dequeue_mode === DequeueMode.OFF) {
+            logger.log("Dequeue mode is disabled %s", reqStatusInQ.dequeue_mode);
+            // When dequeue is disable backend should send backoff_interval zero
+            requestDetails = {
+                ...requestDetails,
+                curPos: currentPosition,
+                nextCallTime: currentRequestTime,
+                delayTime: delayTime
+                    ? delayTime + generateRandomInteger(20, 25)
+                    : reqStatusInQ.avg_waiting_time,
+            };
+            // Increasing wait time as dequeue is disabled
+            reqStatusInQ.avg_waiting_time = requestDetails.delayTime; // calculate mock wait time by increasing 20 to 30 seconds
+            reqStatusInQ.position = currentPosition;
+        }
+        else {
+            // update current position in cookie, backoff_interval
+            const isEWInSync = currentPosition > reqStatusInQ.position;
+            logger.log("Dequeue mode is enabled %s isEWInSync %s", reqStatusInQ.dequeue_mode, isEWInSync);
+            requestDetails = {
+                ...requestDetails,
+                delayTime: undefined,
+                curPos: isEWInSync ? reqStatusInQ.position : currentPosition,
+                nextCallTime: isEWInSync
+                    ? reqStatusInQ.backoff_interval * 1000 +
+                        currentRequestTime
+                    : currentRequestTime,
+            };
+            if (!isEWInSync) {
+                // Disabling backoff until server and EW are not in Sync.
+                reqStatusInQ.backoff_interval = 0;
+                reqStatusInQ.position = currentPosition;
+            }
+        }
         // when no backoff interval is reached we are sending all call to server
         if (Connection.getInstance().noBackOffThreshold >=
             reqStatusInQ.backoff_interval) {
@@ -1199,7 +1243,7 @@ const getTTL = (request, cookieBase) => {
         maxAge = VwrDurations.getSessionMaxAgeSec(avgWaitingTime);
     }
     else if (cookieBase?.type === TokenType.ACCESS) {
-        const accessDuration = cookieBase?.meta?.domainDetails?.access_duration ||
+        const accessDuration = cookieBase?.meta?.domainDetails?.max_origin_usage_time ||
             VwrDurations.accessMaxAgeInSec;
         const createdAt = cookieBase.createdAt;
         if (typeof createdAt === "number") {
@@ -1256,7 +1300,7 @@ const setHeaders = (response, headers) => {
  *   isFailOpen: false,
  *   digestKey:"YourVwrsDigestKey",
  *   encryptionKey: "YourVwrsEncryptionKey",
- *   originAccessMode: "FIXED | MOVING",
+ *   originAccessMode: "ORIGIN_USAGE_TIME | ORIGIN_IDLE_TIME",
  *   retryLimit: 1,
  *   statusConfigLimits:{
  *     avgWaitingTime: true|false,
@@ -1281,7 +1325,7 @@ class VirtualWaitingRoom {
      *    isFailOpen:true | false <set it to 'true' to navigate to origin in case of failure>,
      *    digestKey:"YourVwrsDigestKey",
      *    encryptionKey: "YourVwrsEncryptionKey",
-     *    originAccessMode: "FIXED",
+     *    originAccessMode: "ORIGIN_USAGE_TIME",
      *    retryLimit: 1
      *    statusConfigLimits:{
      *      avgWaitingTime:true|false,
@@ -1330,14 +1374,14 @@ class VirtualWaitingRoom {
             }
             if (cookieExists || Object.keys(result).length > 0) {
                 if (Object.keys(result).length > 0) {
-                    const { access_duration, waiting_room_path: waitingRoomPath, is_queue_enabled, domain_key, domain_url, } = result;
+                    const { max_origin_usage_time, waiting_room_path: waitingRoomPath, is_queue_enabled, domain_key, domain_url, } = result;
                     const reqWaitingRoomPath = requestOpts?.waitingRoomPath;
                     const waiting_room_path = reqWaitingRoomPath ?? waitingRoomPath;
                     const cookiePath = getCookiePath(domain_url);
                     persistData(request, {
                         meta: {
                             domainDetails: {
-                                access_duration,
+                                max_origin_usage_time,
                                 waiting_room_path,
                                 is_queue_enabled,
                                 domain_key,
