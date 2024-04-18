@@ -1,3 +1,4 @@
+import json
 import os
 import requests
 import toml
@@ -7,16 +8,6 @@ from urllib.parse import urlparse
 # Define constants for the API host, API Key, and path to the TOML configuration file.
 # These values are placeholders and should be replaced with actual data or read from environment variables.
 TOML_FILE_PATH = 'photoniq_vwrs.toml' # VWRS domain configuration toml file path
-
-# Define a mapping to convert TOML field names to the expected database field names.
-# This helps in aligning the TOML configuration with the database schema.
-FIELD_NAME_MAPPING = {
-    'rate_period': 'period',
-    'queue_mode': 'queue_enablement',
-    'request_priority': 'priority',
-    'waiting_room_interval': 'status_interval',
-    'max_origin_usage_time': 'access_duration'
-}
 
 # Define the headers for HTTP requests to the VWRS API, including authorization and content type.
 VWRS_HEADERS = {
@@ -46,25 +37,16 @@ def print_response_content(response):
     if response.content:
             print(f'Response content: {response.content.decode("utf-8")}\n')
 
-def get_domain_mapping(dictionary):
-    """Converts policy data from the TOML format to the format expected by the database."""
-    updated = {}
-    for key, value in dictionary.items():
-        # Special handling for 'queue_mode' and 'dequeue_mode' fields to convert 'auto', 'on', 'off' into boolean.
-        if key in ['queue_mode', 'dequeue_mode'] and value != 'auto':
-            value = 'manual'
-            updated['is_queue_enabled'] = (value == 'on')
-        # Use the FIELD_NAME_MAPPING to translate TOML field names to database field names.
-        new_key = FIELD_NAME_MAPPING.get(key, key)
-        updated[new_key] = value
-    return updated
-
 def get_domain(key):
     """Fetches an existing domain entry from VWRS API by a unique key."""
     try:
         response = requests.get(f'https://{VWRS_HOST}/api/vwr/v1/domains/{key}', headers=VWRS_HEADERS)
         response.raise_for_status()
         return response.json()
+    except json.JSONDecodeError as e:
+        # Failed to parse json.
+        print(f'Failed to parse json response of GET for {key}: {e}')
+        print_response_content(response)
     except requests.RequestException as e:
         # Log an error if there's an issue with the request to fetch the domain.
         print(f'Failed to read entry {key}: {e}')
@@ -78,6 +60,10 @@ def create_domain(entry):
         response.raise_for_status()
         # Log a success message with details from the API response.
         print(f'Entry added successfully: {response.json()}')
+    except json.JSONDecodeError as e:
+        # Failed to parse json.
+        print(f'Failed to create entry, invalid JSON: {e}')
+        print_response_content(response)
     except requests.RequestException as e:
         # Log an error if the POST request fails.
         print(f'Failed to create entry: {e}')
@@ -91,26 +77,27 @@ def update_domain(key, entry):
         response.raise_for_status()
         # Log a success message with details from the API response.
         print(f'Entry updated successfully: {response.json()}')
+    except json.JSONDecodeError as e:
+        # Failed to parse json.
+        print(f'Failed to parse json response of PATCH for {key}: {e}')
+        print_response_content(response)
     except requests.RequestException as e:
         # Log an error if the PATCH request fails.
         print(f'Failed to update entry {key}: {e}')
         print_response_content(response)
 
-
 def process_entries(entries):
     """Processes each policy entry by either updating an existing entry or creating a new one."""
     for entry in entries:
         key = entry['domain_key']
-        # Convert the entry from TOML format to vwrs format.
-        vwrs_entry = get_domain_mapping(entry)
         # Attempt to fetch an existing domain entry by its key.
         existing_entry = get_domain(key)
         if existing_entry:
             # If an entry exists, update it with the new data.
-            update_domain(key, vwrs_entry)
+            update_domain(key, entry)
         else:
             # If no entry exists, create a new one.
-            create_domain(vwrs_entry)
+            create_domain(entry)
 
 def collect_domain_paths(policies):
     """Collect a set of all domain_url fields from a list of policies."""
