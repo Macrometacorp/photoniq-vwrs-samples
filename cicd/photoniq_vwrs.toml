@@ -1,6 +1,6 @@
 [[policies]]
-domain_key = "<unique_waiting_room_name>"
-domain_url = "www.example.com/abc"
+waitingroom_key = "<unique_waiting_room_name>"
+waitingroom_url = "www.example.com/abc"
 queue_access_type = "users"
 queue_type = "fifo"
 rate_limit = 100
