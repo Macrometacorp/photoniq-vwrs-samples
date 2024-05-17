@@ -31,7 +31,7 @@ const VwrDefaults = {
     NO_BACK_OFF_THRESHOLD: 5,
     REQUEST_TIMEOUT: 4500,
 };
-const VWRoomVersion = "1.26.0";
+const VWRoomVersion = "2.0.0";
 var HttpMethods;
 (function (HttpMethods) {
     HttpMethods["GET"] = "GET";
@@ -88,7 +88,7 @@ var TransportVariables;
 var StatusCode;
 (function (StatusCode) {
     // ERROR status code
-    StatusCode["ERROR_HTTP_DOMAIN_DETAILS"] = "EHDD";
+    StatusCode["ERROR_HTTP_WAITINGROOM_DETAILS"] = "EHWD";
     StatusCode["ERROR_HTTP_REQ_STATUS"] = "EHRS";
     StatusCode["ERROR_HTTP_REQ_PUSH"] = "EHRP";
     StatusCode["ERROR_HTTP_METRIC_NOTIFY"] = "EHMN";
@@ -183,12 +183,12 @@ const PreviewStatusResponse = {
     },
 };
 const keyMappings = {
-    domainDetails: "dd",
+    waitingroomDetails: "wd",
     max_origin_usage_time: "ad",
     waiting_room_path: "wrp",
     is_queue_enabled: "qe",
-    domain_key: "dk",
-    domain_url: "du",
+    waitingroom_key: "wk",
+    waitingroom_url: "wu",
     requestDetails: "rd",
     priority: "p",
     reqId: "r",
@@ -274,15 +274,15 @@ class Connection {
     }
     buildMMUrl = (url, suffix) => {
         // Remove "https://" if present
-        let domain = url.replace("https://", "");
-        // Remove any path after the domain
-        const pathIndex = domain.indexOf("/");
+        let waitingroom = url.replace("https://", "");
+        // Remove any path after the waiting room
+        const pathIndex = waitingroom.indexOf("/");
         if (pathIndex !== -1) {
-            domain = domain.substring(0, pathIndex);
+            waitingroom = waitingroom.substring(0, pathIndex);
         }
         // Remove any trailing slashes
-        domain = domain.replace(/\/+$/, "");
-        return `https://${domain}${suffix}`;
+        waitingroom = waitingroom.replace(/\/+$/, "");
+        return `https://${waitingroom}${suffix}`;
     };
     processUiLimits(statusConfigLimits) {
         if (statusConfigLimits) {
@@ -412,12 +412,12 @@ const errorHandler = async (request, requestOpts = {}, isIngress, e) => {
         const persistedData = getPersistedData(request);
         const reqId = persistedData?.meta?.requestDetails?.reqId ?? getUUID();
         const priority = VwrDefaults.PRIORITY;
-        const domain_key = persistedData?.meta?.domainDetails?.domain_key || "";
-        const domain_url = persistedData?.meta?.domainDetails?.domain_url || "";
+        const waitingroom_key = persistedData?.meta?.waitingroomDetails?.waitingroom_key || "";
+        const waitingroom_url = persistedData?.meta?.waitingroomDetails?.waitingroom_url || "";
         persistData(ingressRequest, {
             meta: {
                 requestDetails: { reqId, priority },
-                domainDetails: { domain_key, is_queue_enabled: false, domain_url },
+                waitingroomDetails: { waitingroom_key, is_queue_enabled: false, waitingroom_url },
             },
         });
         await gotoOrigin(ingressRequest);
@@ -477,20 +477,20 @@ const httpHelper = async (request, context, fetcher, onFailStatusCode, throwErro
         }
     }
 };
-const getDomainDetails = async (request) => {
-    const domainUrl = getDomain(request);
-    logger.log("getDomainDetails:%s", domainUrl);
-    const fetcher = () => httpRequest(`${Connection.getInstance().vwrUrl}/domains?url=${domainUrl}&wildcard=true&client_version=${VWRoomVersion}`, {
+const getWaitingRoomDetails = async (request) => {
+    const waitingRoomUrl = getWaitingRoom(request);
+    logger.log("getWaitingRoomDetails:%s", waitingRoomUrl);
+    const fetcher = () => httpRequest(`${Connection.getInstance().vwrUrl}/waitingrooms?url=${waitingRoomUrl}&wildcard=true&client_version=${VWRoomVersion}`, {
         method: HttpMethods.GET,
         headers: getHeadersWithAuth(),
         timeout: Connection.getInstance().requestTimeout,
     });
-    return await httpHelper(request, "getDomainDetails", fetcher, StatusCode.ERROR_HTTP_DOMAIN_DETAILS, true, [HttpStatusCodes.NOT_FOUND]);
+    return await httpHelper(request, "getWaitingRoomDetails", fetcher, StatusCode.ERROR_HTTP_WAITINGROOM_DETAILS, true, [HttpStatusCodes.NOT_FOUND]);
 };
-const pushRequestToQueue = async (request, requestType, reqId, domain, priority) => {
-    logger.log("pushRequestToQueue", reqId, domain);
+const pushRequestToQueue = async (request, requestType, reqId, waitingroom, priority) => {
+    logger.log("pushRequestToQueue", reqId, waitingroom);
     const body = {
-        domain_key: domain,
+        waitingroom_key: waitingroom,
         region: getLocationDetails(request),
         request_time: Date.now(),
         duplicate: requestType === RequestType.EXISTING_REQUEST,
@@ -504,18 +504,18 @@ const pushRequestToQueue = async (request, requestType, reqId, domain, priority)
     });
     return await httpHelper(request, "pushRequestToQueue", fetcher, StatusCode.ERROR_HTTP_REQ_PUSH);
 };
-const getQueueStatusForRequest = async (request, reqId, domain_key, sid, created_at, priority) => {
-    const fetcher = () => httpRequest(`${Connection.getInstance().vwrUrl}/requests/status/${reqId}?domain=${domain_key}&sid=${sid}&created_at=${created_at}&priority=${priority}&client_version=${VWRoomVersion}`, {
+const getQueueStatusForRequest = async (request, reqId, waitingroom_key, sid, created_at, priority) => {
+    const fetcher = () => httpRequest(`${Connection.getInstance().vwrUrl}/requests/status/${reqId}?waitingroom=${waitingroom_key}&sid=${sid}&created_at=${created_at}&priority=${priority}&client_version=${VWRoomVersion}`, {
         method: HttpMethods.GET,
         headers: getHeadersWithAuth(),
         timeout: Connection.getInstance().requestTimeout,
     });
     return await httpHelper(request, "getQueueStatusForRequest", fetcher, StatusCode.ERROR_HTTP_REQ_STATUS);
 };
-const notifyMetricServer = async (request, reqId, domain_key) => {
+const notifyMetricServer = async (request, reqId, waitingroom_key) => {
     const body = {
         user_id: reqId,
-        domain_key: domain_key,
+        waitingroom_key: waitingroom_key,
         notificationType: getNotificationType(request),
         region: getLocationDetails(request),
     };
@@ -528,7 +528,7 @@ const notifyMetricServer = async (request, reqId, domain_key) => {
     return await httpHelper(request, "pushMetric", fetcher, StatusCode.ERROR_HTTP_METRIC_NOTIFY, false);
 };
 
-const getDomain = (req) => {
+const getWaitingRoom = (req) => {
     return `${req.host}${getSanitizedPath(req)}`;
 };
 const getUUID = () => {
@@ -576,7 +576,7 @@ const getWaitingRoomPath = async (request, requestOpts) => {
     if (requestOpts?.waitingRoomPath) {
         return requestOpts.waitingRoomPath;
     }
-    const result = await getDomainDetails(request).then((res) => res.json());
+    const result = await getWaitingRoomDetails(request).then((res) => res.json());
     if (result) {
         const { waiting_room_path } = result;
         if (waiting_room_path) {
@@ -636,9 +636,9 @@ const persistData = (request, options = { meta: {} }) => {
     let updatedData = {
         ...originalData,
         meta: {
-            domainDetails: {
-                ...originalData?.meta?.domainDetails,
-                ...options?.meta?.domainDetails,
+            waitingroomDetails: {
+                ...originalData?.meta?.waitingroomDetails,
+                ...options?.meta?.waitingroomDetails,
             },
             requestDetails: {
                 ...originalData?.meta?.requestDetails,
@@ -706,9 +706,9 @@ const mapKeysToLong = (data) => {
     const reversedMappings = Object.fromEntries(Object.entries(keyMappings).map(([k, v]) => [v, k]));
     return mapKeys(data, reversedMappings, true);
 };
-const getCookiePath = (domain_url) => {
-    const slashIndex = domain_url.indexOf(EwPaths.ROOT);
-    return slashIndex > -1 ? domain_url.substring(slashIndex) : EwPaths.ROOT;
+const getCookiePath = (waitingroom_url) => {
+    const slashIndex = waitingroom_url.indexOf(EwPaths.ROOT);
+    return slashIndex > -1 ? waitingroom_url.substring(slashIndex) : EwPaths.ROOT;
 };
 const updateTimesSubtractCreatedAt = (data) => {
     if (!data?.createdAt)
@@ -896,7 +896,7 @@ function base64Encode(input) {
 const getVersion = () => logger.log("VWRoomVersion %s", VWRoomVersion);
 const gotoOrigin = async (request, requestOpts) => {
     logger.log("go to origin");
-    const { meta: { requestDetails: { reqId }, domainDetails: { domain_key }, }, } = getPersistedData(request);
+    const { meta: { requestDetails: { reqId }, waitingroomDetails: { waitingroom_key }, }, } = getPersistedData(request);
     persistTokenType(request, TokenType.ACCESS);
     if (isStatusPath(request)) {
         logger.log("moving request to status path");
@@ -906,7 +906,7 @@ const gotoOrigin = async (request, requestOpts) => {
     }
     else {
         // as we are just doing for browsers push metrics only when actually going to origin
-        notifyMetricServer(request, reqId, domain_key);
+        notifyMetricServer(request, reqId, waitingroom_key);
         // NOOP - goes to origin
         request.setVariable(TransportVariables.STATUS_CODE, StatusCode.SUCCESS_ROUTE_ORIGIN_LIVE);
     }
@@ -935,7 +935,7 @@ const goToPreview = async (request, requestOpts) => {
 };
 const gotoWaitingRoom = async (request, requestOpts, reqStatus) => {
     logger.log("go to waiting room");
-    const { meta: { requestDetails: { reqId }, domainDetails: { waiting_room_path }, }, } = getPersistedData(request);
+    const { meta: { requestDetails: { reqId }, waitingroomDetails: { waiting_room_path }, }, } = getPersistedData(request);
     persistTokenType(request, TokenType.SESSION);
     const isStatusRequest = isStatusPath(request);
     if (isStatusRequest) {
@@ -1040,12 +1040,12 @@ const newRequestHandler = async (request, requestOpts) => {
     const reqId = getUUID();
     // timestamp for when the cookie is created
     const cookieCreatedAt = VwrDurations.currentTime;
-    const { meta: { domainDetails: { is_queue_enabled, domain_key }, requestDetails: { priority }, }, } = getPersistedData(request);
+    const { meta: { waitingroomDetails: { is_queue_enabled, waitingroom_key }, requestDetails: { priority }, }, } = getPersistedData(request);
     logger.log(`Q is enabled ${is_queue_enabled}`);
     if (is_queue_enabled) {
         logger.log("Q is enabled");
-        const { sid, created_at, backoff_interval, position, rate_limit, queue_depth, waiting_room_interval, } = await pushRequestToQueue(request, RequestType.NEW_REQUEST, reqId, domain_key, priority).then((res) => res.json());
-        logger.log("request pushed to Q", domain_key, sid, created_at);
+        const { sid, created_at, backoff_interval, position, rate_limit, queue_depth, waiting_room_interval, } = await pushRequestToQueue(request, RequestType.NEW_REQUEST, reqId, waitingroom_key, priority).then((res) => res.json());
+        logger.log("request pushed to Q", waitingroom_key, sid, created_at);
         persistData(request, {
             meta: {
                 requestDetails: {
@@ -1079,7 +1079,7 @@ const existingRequestHandler = async (request, requestOpts) => {
     const persistedData = getPersistedData(request);
     const reqId = persistedData?.meta?.requestDetails?.reqId;
     const sid = persistedData?.meta?.requestDetails?.sid;
-    const domain_key = persistedData?.meta?.domainDetails?.domain_key;
+    const waitingroom_key = persistedData?.meta?.waitingroomDetails?.waitingroom_key;
     const created_at = persistedData?.meta?.requestDetails?.created_at;
     const priority = persistedData?.meta?.requestDetails?.priority;
     const currentPosition = persistedData?.meta?.requestDetails?.curPos;
@@ -1121,12 +1121,12 @@ const existingRequestHandler = async (request, requestOpts) => {
         // checking edge case where queue depth is less than current position
         if (newPosition === 0 || queueDepth === 0) {
             logger.log("Fetching actual status call due", queueDepth, newPosition);
-            reqStatusInQ = await getQueueStatusForRequest(request, reqId, domain_key, sid, created_at, priority).then((res) => res.json());
+            reqStatusInQ = await getQueueStatusForRequest(request, reqId, waitingroom_key, sid, created_at, priority).then((res) => res.json());
             requestDetails.curPos = reqStatusInQ.position;
         }
     }
     else {
-        reqStatusInQ = await getQueueStatusForRequest(request, reqId, domain_key, sid, created_at, priority).then((res) => res.json());
+        reqStatusInQ = await getQueueStatusForRequest(request, reqId, waitingroom_key, sid, created_at, priority).then((res) => res.json());
         requestDetails = {
             ...requestDetails,
             qDepth: reqStatusInQ.queue_depth,
@@ -1196,23 +1196,23 @@ const existingRequestHandler = async (request, requestOpts) => {
     else {
         if (!isStatusPath(request)) {
             // non-status requests if come again are treated as duplicate
-            await pushRequestToQueue(request, RequestType.EXISTING_REQUEST, reqId, domain_key, priority);
+            await pushRequestToQueue(request, RequestType.EXISTING_REQUEST, reqId, waitingroom_key, priority);
         }
         // persisted data from cookie will be enough
         await gotoWaitingRoom(request, requestOpts, reqStatusInQ);
     }
 };
 
-const setGeneralAttributes = (request, domain_url = EwPaths.ROOT) => {
+const setGeneralAttributes = (request, waitingroom_url = EwPaths.ROOT) => {
     return {
         name: CookieIdentifier.SESSION,
-        domain: request.host,
+        waitingroom: request.host,
         sameSite: "Strict",
         httpOnly: true,
         secure: true,
-        // the cookie should be set on the 'domain_url'
+        // the cookie should be set on the 'waitingroom_url'
         // so that its sub-paths also share it
-        path: domain_url,
+        path: waitingroom_url,
     };
 };
 const getResponseConfig = (request) => {
@@ -1243,7 +1243,7 @@ const getTTL = (request, cookieBase) => {
         maxAge = VwrDurations.getSessionMaxAgeSec(avgWaitingTime);
     }
     else if (cookieBase?.type === TokenType.ACCESS) {
-        const accessDuration = cookieBase?.meta?.domainDetails?.max_origin_usage_time ||
+        const accessDuration = cookieBase?.meta?.waitingroomDetails?.max_origin_usage_time ||
             VwrDurations.accessMaxAgeInSec;
         const createdAt = cookieBase.createdAt;
         if (typeof createdAt === "number") {
@@ -1276,7 +1276,7 @@ const getCookieSecurity = async (request, extraFingerPrint, cookieBase) => {
             fingerprint,
         },
         cookieProperties: {
-            ...setGeneralAttributes(request, cookieBase?.meta?.domainDetails?.domain_url),
+            ...setGeneralAttributes(request, cookieBase?.meta?.waitingroomDetails?.waitingroom_url),
             maxAge,
         },
     };
@@ -1362,30 +1362,30 @@ class VirtualWaitingRoom {
             // if cookie are received for this path then it means we are on the correct path
             // as the "path" attribute of cookies is set
             if (!cookieExists) {
-                const response = await getDomainDetails(request);
+                const response = await getWaitingRoomDetails(request);
                 const { status } = response;
                 if (status === HttpStatusCodes.OK) {
                     result = await response.json();
                 }
                 else if (status === HttpStatusCodes.NOT_FOUND) {
-                    logger.log("E:Domain not found");
+                    logger.log("E:Waiting room not found");
                     request.setVariable(TransportVariables.FLOW, Flow.NO_WAITING_ROOM);
                 }
             }
             if (cookieExists || Object.keys(result).length > 0) {
                 if (Object.keys(result).length > 0) {
-                    const { max_origin_usage_time, waiting_room_path: waitingRoomPath, is_queue_enabled, domain_key, domain_url, } = result;
+                    const { max_origin_usage_time, waiting_room_path: waitingRoomPath, is_queue_enabled, waitingroom_key, waitingroom_url, } = result;
                     const reqWaitingRoomPath = requestOpts?.waitingRoomPath;
                     const waiting_room_path = reqWaitingRoomPath ?? waitingRoomPath;
-                    const cookiePath = getCookiePath(domain_url);
+                    const cookiePath = getCookiePath(waitingroom_url);
                     persistData(request, {
                         meta: {
-                            domainDetails: {
+                            waitingroomDetails: {
                                 max_origin_usage_time,
                                 waiting_room_path,
                                 is_queue_enabled,
-                                domain_key,
-                                domain_url: cookiePath,
+                                waitingroom_key,
+                                waitingroom_url: cookiePath,
                             },
                             requestDetails: {
                                 priority: requestOpts?.priority ?? VwrDefaults.PRIORITY,
