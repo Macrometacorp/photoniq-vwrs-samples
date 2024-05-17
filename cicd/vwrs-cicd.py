@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 
 # Define constants for the API host, API Key, and path to the TOML configuration file.
 # These values are placeholders and should be replaced with actual data or read from environment variables.
-TOML_FILE_PATH = 'photoniq_vwrs.toml' # VWRS domain configuration toml file path
+TOML_FILE_PATH = 'photoniq_vwrs.toml' # VWRS waiting room configuration toml file path
 
 # Define the headers for HTTP requests to the VWRS API, including authorization and content type.
 VWRS_HEADERS = {
@@ -37,10 +37,10 @@ def print_response_content(response):
     if response.content:
             print(f'Response content: {response.content.decode("utf-8")}\n')
 
-def get_domain(key):
-    """Fetches an existing domain entry from VWRS API by a unique key."""
+def get_waitingroom(key):
+    """Fetches an existing waiting room entry from VWRS API by a unique key."""
     try:
-        response = requests.get(f'https://{VWRS_HOST}/api/vwr/v1/domains/{key}', headers=VWRS_HEADERS)
+        response = requests.get(f'https://{VWRS_HOST}/api/vwr/v1/waitingrooms/{key}', headers=VWRS_HEADERS)
         response.raise_for_status()
         return response.json()
     except json.JSONDecodeError as e:
@@ -48,15 +48,15 @@ def get_domain(key):
         print(f'Failed to parse json response of GET for {key}: {e}')
         print_response_content(response)
     except requests.RequestException as e:
-        # Log an error if there's an issue with the request to fetch the domain.
+        # Log an error if there's an issue with the request to fetch the waiting room.
         print(f'Failed to read entry {key}: {e}')
         print_response_content(response)
     return None
 
-def create_domain(entry):
-    """Creates a new domain entry in VWRS via a POST request to the API."""
+def create_waitingroom(entry):
+    """Creates a new waiting room entry in VWRS via a POST request to the API."""
     try:
-        response = requests.post(f'https://{VWRS_HOST}/api/vwr/v1/domains', json=entry, headers=VWRS_HEADERS)
+        response = requests.post(f'https://{VWRS_HOST}/api/vwr/v1/waitingrooms', json=entry, headers=VWRS_HEADERS)
         response.raise_for_status()
         # Log a success message with details from the API response.
         print(f'Entry added successfully: {response.json()}')
@@ -70,10 +70,10 @@ def create_domain(entry):
         print_response_content(response)
 
 
-def update_domain(key, entry):
-    """Updates an existing domain entry in VWRS via a PATCH request to the API."""
+def update_waitingroom(key, entry):
+    """Updates an existing waiting room entry in VWRS via a PATCH request to the API."""
     try:
-        response = requests.patch(f'https://{VWRS_HOST}/api/vwr/v1/domains/{key}', json=entry, headers=VWRS_HEADERS)
+        response = requests.patch(f'https://{VWRS_HOST}/api/vwr/v1/waitingrooms/{key}', json=entry, headers=VWRS_HEADERS)
         response.raise_for_status()
         # Log a success message with details from the API response.
         print(f'Entry updated successfully: {response.json()}')
@@ -89,24 +89,24 @@ def update_domain(key, entry):
 def process_entries(entries):
     """Processes each policy entry by either updating an existing entry or creating a new one."""
     for entry in entries:
-        key = entry['domain_key']
-        # Attempt to fetch an existing domain entry by its key.
-        existing_entry = get_domain(key)
+        key = entry['waitingroom_key']
+        # Attempt to fetch an existing waiting room entry by its key.
+        existing_entry = get_waitingroom(key)
         if existing_entry:
             # If an entry exists, update it with the new data.
-            update_domain(key, entry)
+            update_waitingroom(key, entry)
         else:
             # If no entry exists, create a new one.
-            create_domain(entry)
+            create_waitingroom(entry)
 
-def collect_domain_paths(policies):
-    """Collect a set of all domain_url fields from a list of policies."""
-    result = set() # The domain paths will be put here.
+def collect_waitingroom_paths(policies):
+    """Collect a set of all waitingroom_url fields from a list of policies."""
+    result = set() # The waiting room paths will be put here.
     for policy in policies:
-        # Get the domain_url for a policy.
-        domain_url = policy['domain_url']
+        # Get the waitingroom_url for a policy.
+        waitingroom_url = policy['waitingroom_url']
         # Extract the path component and remove the leading slash.
-        path = urlparse(domain_url).path.lstrip('/')
+        path = urlparse(waitingroom_url).path.lstrip('/')
         # Add to the set.
         result.add(path)
     return result
