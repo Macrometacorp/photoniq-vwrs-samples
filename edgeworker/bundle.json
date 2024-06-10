@@ -1,5 +1,5 @@
 {
-  "edgeworker-version": "0.34",
+  "edgeworker-version": "0.36",
   "bundle-version": 1,
   "api-version": "0.3",
   "description": "Virtual Waiting Room"
