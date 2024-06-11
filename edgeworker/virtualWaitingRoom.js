@@ -31,7 +31,7 @@ const VwrDefaults = {
     NO_BACK_OFF_THRESHOLD: 5,
     REQUEST_TIMEOUT: 4500,
 };
-const VWRoomVersion = "2.0.0";
+const VWRoomVersion = "2.1.0";
 var HttpMethods;
 (function (HttpMethods) {
     HttpMethods["GET"] = "GET";
@@ -204,6 +204,7 @@ const keyMappings = {
     type: "t",
     meta: "m",
     delayTime: "dt",
+    dequeue_mode: "dm",
 };
 
 class Connection {
@@ -275,11 +276,6 @@ class Connection {
     buildMMUrl = (url, suffix) => {
         // Remove "https://" if present
         let waitingroom = url.replace("https://", "");
-        // Remove any path after the waiting room
-        const pathIndex = waitingroom.indexOf("/");
-        if (pathIndex !== -1) {
-            waitingroom = waitingroom.substring(0, pathIndex);
-        }
         // Remove any trailing slashes
         waitingroom = waitingroom.replace(/\/+$/, "");
         return `https://${waitingroom}${suffix}`;
@@ -414,10 +410,11 @@ const errorHandler = async (request, requestOpts = {}, isIngress, e) => {
         const priority = VwrDefaults.PRIORITY;
         const waitingroom_key = persistedData?.meta?.waitingroomDetails?.waitingroom_key || "";
         const waitingroom_url = persistedData?.meta?.waitingroomDetails?.waitingroom_url || "";
+        const dequeue_mode = persistedData?.meta?.waitingroomDetails?.dequeue_mode || DequeueMode.ON;
         persistData(ingressRequest, {
             meta: {
                 requestDetails: { reqId, priority },
-                waitingroomDetails: { waitingroom_key, is_queue_enabled: false, waitingroom_url },
+                waitingroomDetails: { waitingroom_key, is_queue_enabled: false, waitingroom_url, dequeue_mode },
             },
         });
         await gotoOrigin(ingressRequest);
@@ -1040,30 +1037,57 @@ const newRequestHandler = async (request, requestOpts) => {
     const reqId = getUUID();
     // timestamp for when the cookie is created
     const cookieCreatedAt = VwrDurations.currentTime;
-    const { meta: { waitingroomDetails: { is_queue_enabled, waitingroom_key }, requestDetails: { priority }, }, } = getPersistedData(request);
+    const { meta: { waitingroomDetails: { is_queue_enabled, waitingroom_key, dequeue_mode }, requestDetails: { priority }, }, } = getPersistedData(request);
     logger.log(`Q is enabled ${is_queue_enabled}`);
     if (is_queue_enabled) {
         logger.log("Q is enabled");
         const { sid, created_at, backoff_interval, position, rate_limit, queue_depth, waiting_room_interval, } = await pushRequestToQueue(request, RequestType.NEW_REQUEST, reqId, waitingroom_key, priority).then((res) => res.json());
         logger.log("request pushed to Q", waitingroom_key, sid, created_at);
-        persistData(request, {
-            meta: {
-                requestDetails: {
-                    reqId,
-                    sid,
-                    created_at,
-                    priority,
-                    lastReqTime: cookieCreatedAt,
-                    nextCallTime: backoff_interval * 1000 + cookieCreatedAt,
-                    curPos: position,
-                    rLimit: rate_limit,
-                    qDepth: queue_depth,
-                    statInt: waiting_room_interval,
+        // If we send this user to the waiting room,
+        // the very next status request they make
+        // will enable access to the origin.
+        // While logically consistent, UX-wise this may look like a bug.
+        // So we address this corner case by
+        // just sending this request straight to the origin.
+        const is_access = (position < rate_limit && dequeue_mode != DequeueMode.OFF);
+        if (is_access) {
+            persistData(request, {
+                meta: {
+                    requestDetails: {
+                        reqId,
+                        priority,
+                        lastReqTime: cookieCreatedAt,
+                        nextCallTime: backoff_interval * 1000 + cookieCreatedAt,
+                        curPos: position,
+                        rLimit: rate_limit,
+                        qDepth: queue_depth,
+                        statInt: waiting_room_interval,
+                    },
                 },
-            },
-            createdAt: cookieCreatedAt,
-        });
-        await gotoWaitingRoom(request, requestOpts);
+                createdAt: cookieCreatedAt,
+            });
+            await gotoOrigin(request);
+        }
+        else {
+            persistData(request, {
+                meta: {
+                    requestDetails: {
+                        reqId,
+                        sid,
+                        created_at,
+                        priority,
+                        lastReqTime: cookieCreatedAt,
+                        nextCallTime: backoff_interval * 1000 + cookieCreatedAt,
+                        curPos: position,
+                        rLimit: rate_limit,
+                        qDepth: queue_depth,
+                        statInt: waiting_room_interval,
+                    },
+                },
+                createdAt: cookieCreatedAt,
+            });
+            await gotoWaitingRoom(request, requestOpts);
+        }
     }
     else {
         persistData(request, {
@@ -1374,7 +1398,7 @@ class VirtualWaitingRoom {
             }
             if (cookieExists || Object.keys(result).length > 0) {
                 if (Object.keys(result).length > 0) {
-                    const { max_origin_usage_time, waiting_room_path: waitingRoomPath, is_queue_enabled, waitingroom_key, waitingroom_url, } = result;
+                    const { max_origin_usage_time, waiting_room_path: waitingRoomPath, is_queue_enabled, waitingroom_key, waitingroom_url, dequeue_mode, } = result;
                     const reqWaitingRoomPath = requestOpts?.waitingRoomPath;
                     const waiting_room_path = reqWaitingRoomPath ?? waitingRoomPath;
                     const cookiePath = getCookiePath(waitingroom_url);
@@ -1386,6 +1410,7 @@ class VirtualWaitingRoom {
                                 is_queue_enabled,
                                 waitingroom_key,
                                 waitingroom_url: cookiePath,
+                                dequeue_mode,
                             },
                             requestDetails: {
                                 priority: requestOpts?.priority ?? VwrDefaults.PRIORITY,
