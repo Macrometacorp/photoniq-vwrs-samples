@@ -1,4 +1,4 @@
-# PhotonIQ VWRS EdgeWorker Library v1.26.0
+# PhotonIQ VWRS EdgeWorker Library
 
 This EdgeWorker library is used to configure a virtual waiting room.
 
