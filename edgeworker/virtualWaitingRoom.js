@@ -31,7 +31,7 @@ const VwrDefaults = {
     NO_BACK_OFF_THRESHOLD: 5,
     REQUEST_TIMEOUT: 4500,
 };
-const VWRoomVersion = "2.1.0";
+const VWRoomVersion = "2.2.0";
 var HttpMethods;
 (function (HttpMethods) {
     HttpMethods["GET"] = "GET";
